@@ -23,13 +23,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 1. Check SMTP is configured ────────────────────────────────────────────
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
   if (!host || !user || !pass) {
-    // Graceful fallback — record invite in Redis anyway (shows as pending in sidebar)
     if (roomId) await storePendingInvite(roomId, email);
     return NextResponse.json(
       { ok: false, fallback: true, error: "SMTP not configured" },
@@ -37,7 +35,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 2. Create transporter ──────────────────────────────────────────────────
   const transporter = nodemailer.createTransport({
     host,
     port: Number(process.env.SMTP_PORT ?? 587),
@@ -45,7 +42,6 @@ export async function POST(req: NextRequest) {
     auth: { user, pass },
   });
 
-  // ── 3. Build the email ─────────────────────────────────────────────────────
   const fromName = process.env.SMTP_FROM_NAME ?? "SyncCode";
   const fromEmail = process.env.SMTP_FROM_EMAIL ?? user;
 
@@ -61,7 +57,6 @@ export async function POST(req: NextRequest) {
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;padding:40px 20px;">
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#111113;border:1px solid #1f1f23;border-radius:14px;overflow:hidden;">
-        <!-- Header -->
         <tr>
           <td style="background:#000;padding:24px 32px;border-bottom:1px solid #1f1f23;">
             <table cellpadding="0" cellspacing="0">
@@ -76,7 +71,6 @@ export async function POST(req: NextRequest) {
             </table>
           </td>
         </tr>
-        <!-- Body -->
         <tr>
           <td style="padding:32px;">
             <h1 style="margin:0 0 8px;font-size:1.3rem;font-weight:700;color:#fafafa;letter-spacing:-0.02em;">
@@ -85,7 +79,6 @@ export async function POST(req: NextRequest) {
             <p style="margin:0 0 24px;font-size:0.9rem;color:#a1a1aa;line-height:1.6;">
               Someone invited you to join a live coding session on SyncCode — a real-time collaborative code editor.
             </p>
-            <!-- Room card -->
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090b;border:1px solid #1f1f23;border-radius:10px;margin-bottom:24px;">
               <tr>
                 <td style="padding:16px 20px;">
@@ -94,7 +87,6 @@ export async function POST(req: NextRequest) {
                 </td>
               </tr>
             </table>
-            <!-- CTA button -->
             <table cellpadding="0" cellspacing="0">
               <tr>
                 <td align="center" style="border-radius:9px;background:#4f9cf9;">
@@ -111,7 +103,6 @@ export async function POST(req: NextRequest) {
             </p>
           </td>
         </tr>
-        <!-- Footer -->
         <tr>
           <td style="padding:16px 32px;border-top:1px solid #1f1f23;background:#0a0a0c;">
             <p style="margin:0;font-size:0.7rem;color:#3f3f46;">
@@ -126,16 +117,28 @@ export async function POST(req: NextRequest) {
 </html>
 `;
 
-  await transporter.sendMail({
-    from: `"${fromName}" <${fromEmail}>`,
-    to: email,
-    subject: `Join my SyncCode session — Room ${roomId}`,
-    html,
-    text: `You've been invited to a SyncCode collaborative coding session!\n\nRoom: ${roomId}\nJoin here: ${roomUrl}\n\nNo signup required — just click the link!`,
-  });
+  const subject = `Join my SyncCode session — Room ${roomId}`;
+  const text = `You've been invited to a SyncCode collaborative coding session!\n\nRoom: ${roomId}\nJoin here: ${roomUrl}\n\nNo signup required — just click the link!`;
 
-  // ── 4. Record pending invite in Redis ─────────────────────────────────────
+  try {
+    await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to: email,
+      subject,
+      html,
+      text,
+    });
+  } catch (err) {
+    console.error("[Invite] SMTP error:", err instanceof Error ? err.message : err);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : "Failed to send email.",
+      },
+      { status: 502 },
+    );
+  }
+
   await storePendingInvite(roomId, email);
-
   return NextResponse.json({ ok: true });
 }
